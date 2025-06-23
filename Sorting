@@ -1,4 +1,3 @@
-```
 import pandas as pd
 import re
 from openpyxl import load_workbook
@@ -78,4 +77,3 @@ with pd.ExcelWriter(input_file, mode='a', engine='openpyxl', if_sheet_exists='re
     df.to_excel(writer, sheet_name='Output', index=False)
 
 print(f"✅ Обработка завершена. Результат записан на лист 'Output' в файл: {input_file}")
-```
