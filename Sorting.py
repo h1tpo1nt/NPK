@@ -1,11 +1,10 @@
 import pandas as pd
 import re
-from openpyxl import load_workbook
 
 def extract_npk(description):
     desc = str(description).lower().strip()
 
-    # Сначала проверяем формат NPK, например: "NPK 19-4-19" или "NPK 13:19:19"
+    # Сначала проверяем формат NPK
     npk_match = re.search(r'npk\s*(\d+)[\-\:\s]*(\d+)[\-\:\s]*(\d+)', desc, re.IGNORECASE)
     if npk_match:
         return {
@@ -14,39 +13,36 @@ def extract_npk(description):
             'K': int(npk_match.group(3))
         }
 
-    # Словарь элементов с ключевыми словами и позициями
+    # Словарь элементов с гибкими паттернами
     elements = {
-        'N': {'keyword': r'азот', 'pos': float('inf'), 'value': 0},
-        'P': {'keyword': r'фосфор', 'pos': float('inf'), 'value': 0},
-        'K': {'keyword': r'кали[й]', 'pos': float('inf'), 'value': 0}
+        'N': {'root': r'\bазот', 'value': 0},
+        'P': {'root': r'\bфосфор|\bp2o5|\bп2о5', 'value': 0},
+        'K': {'root': r'\bкали[йяие]|k2o', 'value': 0}
     }
 
-    # Поиск позиций каждого слова в строке
-    for el_key, data in elements.items():
-        match = re.search(data['keyword'], desc, re.IGNORECASE)
-        if match:
-            elements[el_key]['pos'] = match.start()
+    # Находим все совпадения ключевых слов
+    all_matches = []
+    for key, data in elements.items():
+        matches = re.finditer(data['root'], desc, re.IGNORECASE)
+        for match in matches:
+            all_matches.append((match.start(), match.end(), key))
 
-    # Сортировка по позиции
-    sorted_elements = sorted(elements.items(), key=lambda x: x[1]['pos'])
-    present_elements = [item for item in sorted_elements if item[1]['pos'] != float('inf')]
+    # Сортируем по позиции
+    all_matches.sort()
 
     # Извлечение чисел между элементами
-    for i, (key, data) in enumerate(present_elements):
-        current_pos = data['pos']
-        next_pos = len(desc) if i == len(present_elements) - 1 else present_elements[i + 1][1]['pos']
+    for i, (start, end, key) in enumerate(all_matches):
+        next_start = len(desc) if i == len(all_matches) - 1 else all_matches[i + 1][0]
+        segment = desc[end:next_start]
 
-        segment = desc[current_pos:next_pos]
-        num_match = re.search(r'\d+[\.,]?\d*', segment)
+        num_match = re.search(r'(\d+[\.,]?\d*)\s*(?:\+/\-[\s\d\.\,%]*)?', segment)
 
         if num_match:
             try:
-                value = float(num_match.group().replace(',', '.'))
+                value = float(num_match.group(1).replace(',', '.'))
                 elements[key]['value'] = value
             except ValueError:
-                elements[key]['value'] = 0
-        else:
-            elements[key]['value'] = 0
+                pass
 
     return {
         'N': elements['N']['value'],
@@ -55,25 +51,48 @@ def extract_npk(description):
     }
 
 # Путь к файлу
-input_file = 'input.xlsx'
+input_file = '/Users/h1tpo1nt/Desktop/test.xlsx'
 
-# Чтение данных из текущего листа
+# Чтение данных из исходного листа
 df = pd.read_excel(input_file)
 
-# Добавляем новые столбцы
-df['N'] = 0
-df['P'] = 0
-df['K'] = 0
+# Починить заголовки
+df.columns = [col.strip() if isinstance(col, str) else col for col in df.columns]
 
-# Обработка каждой строки
+# Проверка наличия нужной колонки
+if 'G31_1' not in df.columns:
+    raise KeyError("В таблице отсутствует колонка 'G31_1'")
+
+# Обработка описаний и создание колонки "Марка"
+марки = []
+npk_flags = []
+
 for idx, row in df.iterrows():
-    result = extract_npk(row['G31_1'])
-    df.at[idx, 'N'] = result['N']
-    df.at[idx, 'P'] = result['P']
-    df.at[idx, 'K'] = result['K']
+    description = str(row['G31_1'])
+    result = extract_npk(description)
+    
+    n = int(result['N']) if result['N'] != 0 else 0
+    p = int(result['P']) if result['P'] != 0 else 0
+    k = int(result['K']) if result['K'] != 0 else 0
+    
+    brand = f"{n}-{p}-{k}"
+    марки.append(brand)
+    
+    if brand == "0-0-0":
+        npk_flags.append("NPK")
+    else:
+        npk_flags.append("")
 
-# Записываем результат в тот же файл, но на новый лист
+# Добавляем новые колонки
+df['Марка'] = марки
+df['NPK'] = npk_flags
+
+# Удаляем временные столбцы N, P, K, если они вдруг появились
+cols_to_keep = ['G31_1', 'Марка', 'NPK']
+df = df[cols_to_keep]
+
+# Перезаписываем исходный лист
 with pd.ExcelWriter(input_file, mode='a', engine='openpyxl', if_sheet_exists='replace') as writer:
-    df.to_excel(writer, sheet_name='Output', index=False)
+    df.to_excel(writer, sheet_name=writer.sheets.keys().__iter__().__next__(), index=False)
 
-print(f"✅ Обработка завершена. Результат записан на лист 'Output' в файл: {input_file}")
+print(f"✅ Обработка завершена. Оставлены только колонки: G31_1, Марка, NPK.")
