@@ -3,20 +3,22 @@ import re
 
 def extract_npk(description):
     desc = str(description).lower().strip()
+    desc = re.sub(r'[\s\xa0\u3000]+', ' ', desc)
 
-    # Удаление невидимых символов и нормализация
-    desc = re.sub(r'[\s\xa0\u3000]+', ' ', desc)  # замена всех видов пробелов на обычный
-
-    # Формат NPK: "NPK 19-4-19", "NPK(S) 15:15:15"
-    npk_match = re.search(r'\bnpk\s*(?:$s$)?\s*(\d+(?:\.\d+)?)\s*[-:/]\s*(\d+(?:\.\d+)?)\s*[-:/]\s*(\d+(?:\.\d+)?)', desc, re.IGNORECASE)
+    # Формат NPK
+    npk_match = re.search(r'\bnpk\s*(?:\(s\))?\s*(\d+(?:\.\d+)?)\s*[-:/]\s*(\d+(?:\.\d+)?)\s*[-:/]\s*(\d+(?:\.\d+)?)', desc, re.IGNORECASE)
     if npk_match:
+        n = float(npk_match.group(1))
+        p = float(npk_match.group(2))
+        k = float(npk_match.group(3))
+        # Проверяем, являются ли значения целыми
         return {
-            'N': float(npk_match.group(1)),
-            'P': float(npk_match.group(2)),
-            'K': float(npk_match.group(3))
+            'N': int(n) if n.is_integer() else n,
+            'P': int(p) if p.is_integer() else p,
+            'K': int(k) if k.is_integer() else k
         }
 
-    # Словарь элементов с гибкими паттернами
+    # Словарь элементов
     elements = {
         'N': {'keywords': [r'\bазот'], 'value': 0},
         'P': {'keywords': [r'\bфосфор', r'\bp2o5', r'\bп2о5'], 'value': 0},
@@ -30,15 +32,15 @@ def extract_npk(description):
             if match:
                 try:
                     value = float(match.group(1).replace(',', '.'))
-                    data['value'] = value
+                    data['value'] = int(value) if value.is_integer() else value
                 except ValueError:
                     continue
-                break  # выходим, если нашли значение
+                break
 
     return {
-        'N': data_to_return(elements['N']['value']),
-        'P': data_to_return(elements['P']['value']),
-        'K': data_to_return(elements['K']['value'])
+        'N': elements['N']['value'],
+        'P': elements['P']['value'],
+        'K': elements['K']['value']
     }
 
 def data_to_return(value):
